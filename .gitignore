@@ -1,0 +1,32 @@
+# Internal — never public
+internal/
+production_flash_log.txt
+.nsp_legal_confirmed
+*.pem
+*.key
+*.p12
+
+# Build artifacts
+firmware/*/build/
+firmware/*/.deps/
+**/__pycache__/
+*.pyc
+*.o
+*.elf
+*.bin
+*.uf2
+*.map
+sdkconfig.old
+
+# ML models — closed source for alpha
+models/converted/*.tflite
+models/training/datasets/
+
+# User config
+config/neuro_config.json
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+.DS_Store
