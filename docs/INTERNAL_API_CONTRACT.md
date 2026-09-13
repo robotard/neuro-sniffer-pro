@@ -12,19 +12,78 @@ an optional one. A command with no safety context is not a valid command.
 
 ## Architecture
 
-    RP2350B = MASTER (owns: safety_guard, audit_logger, proximity_guard)
-    C5      = RF SLAVE (owns: Wi-Fi, BLE, Zigbee, CSI, OTA client)
+    RP2350B = MASTER (owns: safety_guard, audit_logger, proximity_guard,
+              Flipper interface, OTA instigation, tx_off verification)
+    C5      = RF SLAVE (owns: Wi-Fi, BLE, Zigbee, CSI)
     S3      = AI SLAVE (owns: TFLite inference, Sub-GHz, NFC, fuzzy_engine)
 
 RP2350B is the only chip that may authorise a transmission. C5 and S3
 propose; RP2350B disposes. Neither slave chip can key a radio without a
-grant from `safety_guard_request_tx()` on the master.
+grant from `safety_guard_request_tx()` on the master. RP2350B has no
+transceiver of its own and does not acquire RF-sensing or decode duties
+— see ADR-017's scope discipline. Its one RF-adjacent extension is an
+independent analog TX-power verification line, not a communications role.
+
+## Two planes (ADR-017)
+
+**Control plane** — RP2350B↔C5, RP2350B↔S3, SPI, `safety_ctx`-gated
+envelope below. Commands, authorisations, audit events. The only path
+that can ever result in a transmission.
+
+**Data plane** — C5↔S3 direct, the existing UART (previously OTA-relay
+only, now also carries bulk sensor data: CSI frames, Sub-GHz IQ, model
+inference results). No `safety_ctx` overhead — it isn't a command
+channel. Structurally cannot transmit: its message parser has zero calls
+into `safety_guard_request_tx()` or anything RF-enabling, checkable by
+`grep` on the data-plane source files. Runs at lower interrupt priority
+than the control plane on both chips, so sensor-data volume can never
+starve a safety message.
+
+If S3 needs C5 to do something that could transmit (e.g. widen a scan
+band), that request goes out on the control plane like any other command
+— authorised or refused by RP2350B — and only the result returns on the
+data plane.
+
+## Hardware abstraction — role, not chip
+
+```
+include/rf_role.h    rf_role_scan_wifi(), rf_role_get_csi_frame(),
+                      rf_role_set_tx_power_mw()
+include/ai_role.h    ai_role_infer(model_id, data), ai_role_load_model()
+include/ctrl_role.h  ctrl_role_authorise_tx(), ctrl_role_audit_log(),
+                      ctrl_role_verify_tx_off()
+```
+
+Implementation: `src/rf_role_esp32c5.c`, `src/ai_role_esp32s3.c`,
+`src/ctrl_role_rp2350b.c` — named role-first, chip-second, so a future
+swap adds a file rather than rewriting call sites. Public API in the
+header; everything else `static` in the `.c` file; state behind an
+opaque handle (`rf_role_handle_t`) so callers can't reach internals.
+
+## Priority / QoS table (static, not adaptive — see ADR-017)
+
+| Command class | Plane | Priority | Max latency |
+|---|---|---|---|
+| Safety block/allow | Control | Highest | 50ms |
+| tx_off verification | Control | Highest | 50ms |
+| TX authorise → RF live | Control | High | 100ms |
+| Audit log write | Control | Medium | 500ms |
+| CSI frame stream | Data | Medium | best-effort, 20Hz |
+| Sub-GHz IQ stream | Data | Medium | best-effort |
+| ai_role_infer() result | Data | Medium | model-dependent |
+| Passive scan/read | Control | Low | 500ms |
+| OTA chunk | Control | Low | 2s |
+
+S3's `ai_role_infer()` is callable as a plain service by anything in the
+system needing a classification — deliberately not a scheduler deciding
+who runs what, just a function anyone can call. See ADR-017 for why
+dynamic AI-orchestrated task placement was rejected.
 
 ## Transport
 
 SPI, RP2350B as master, GPIO5=CS→C5, GPIO6=CS→S3 (shared CLK/MOSI/MISO,
-per hardware/PCBWAY_KICAD_AI_PROMPT_SPINE.md). C5↔S3 keep a direct UART
-for the OTA relay path only — that path never carries TX commands.
+per hardware/PCBWAY_KICAD_AI_PROMPT_SPINE.md) carries the control plane.
+C5↔S3 direct UART carries the data plane (see above).
 
 ## Message envelope (v1.0)
 
@@ -74,15 +133,6 @@ Response:
 - A slave never calls back into the master synchronously — it posts to
   the master's inbound queue and continues its own loop.
 
-## Performance budget
-
-| Command class | Max latency |
-|---|---|
-| Safety block/allow decision | 50ms (matches task_safety_guard.c tick) |
-| Passive scan/read | 500ms |
-| TX authorise → RF live | 100ms |
-| OTA chunk | 2s |
-
 ## Chip-swap entropy
 
 A future chip swap (e.g. C5 → a hypothetical C7) only requires a new
@@ -92,4 +142,4 @@ ever assumed anything about C5's internals — they only ever spoke this
 envelope.
 
 ---
-*ADR-015 | v0.3.3.0 | robotard*
+*ADR-015 + ADR-017 | v0.3.3.0 | robotard*
