@@ -1,0 +1,23 @@
+Ref,Value,Part Number,Manufacturer,Qty,Unit_USD,Total_USD,Source,Notes
+U1,ESP32-C5-WROOM-1-N4,ESP32-C5-WROOM-1-N4,Espressif,1,4.80,4.80,LCSC,Dual-band WiFi6 2.4+5GHz BLE5 Zigbee #1CSI
+U2,ESP32-S3-WROOM-1-N16R8,ESP32-S3-WROOM-1-N16R8,Espressif,1,5.50,5.50,LCSC,TFLite AI 16MB/8MB PSRAM
+U3,RP2350B-QFN56,RP2350B,Raspberry Pi,1,1.20,1.20,DigiKey,Master controller
+U4,E22-900M22S,E22-900M22S,Ebyte,1,3.80,3.80,LCSC,SX1262 150-960MHz LoRa/FSK/OOK
+U5,PN532 QFN32,PN532,NXP,1,2.50,2.50,LCSC,NFC/RFID Mifare/NTAG/DESFire
+U6,NEO-M9N-00B,NEO-M9N-00B,u-blox,1,6.00,6.00,DigiKey,GNSS GPS/GLONASS/Galileo
+U7,TPS2115ADRBT,TPS2115A,TI,1,0.90,0.90,DigiKey,Power MUX Flipper/USB-C
+U8,MT3608,MT3608,Aerosemi,1,0.60,0.60,LCSC,Boost converter 5V
+SW1,SS12D00-G3,SS12D00-G3,CK,1,0.40,0.40,DigiKey,Kill switch - cuts RF VCC
+J1,USB-C 2.0,632723300011,Wurth,1,0.50,0.50,DigiKey,USB-C receptacle
+J2,2x5 2.54mm,Generic,Generic,1,0.30,0.30,LCSC,Flipper Zero GPIO header
+J3,SMA edge,SMA-J-P-H-ST-EM1,Samtec,1,0.50,0.50,DigiKey,50-ohm SMA for SX1262
+J4,1x4 2.54mm,Generic,Generic,1,0.20,0.20,LCSC,OLED I2C header
+J5,microSD SPI,101-00565,Amphenol,1,0.50,0.50,DigiKey,Push-push microSD
+Shield1,RF can C5,SMD-50-55-1,Laird,1,1.20,1.20,DigiKey,Metal shield over C5
+Shield2,RF can S3,SMD-50-55-1,Laird,1,1.20,1.20,DigiKey,Metal shield over S3
+C1-25,100nF 0402 X7R,GRM155R71C104KA88D,Murata,25,0.02,0.50,LCSC,VCC decoupling
+C26-30,10uF 0402 X5R,GRM155R60J106ME15D,Murata,5,0.08,0.40,LCSC,Bulk decoupling
+L1,4.7uH 0402,LQW15AN4N7G00D,Murata,1,0.40,0.40,DigiKey,Boost inductor
+R1-10,10k 0402,RC0402FR-0710KL,Yageo,10,0.01,0.10,LCSC,Pull-ups
+PCB,4L 65x35mm ENIG Black,Custom,PCBWay,1,2.20,2.20,PCBWay,4-layer prototype 5-off rate
+TOTAL,,,,,,34.30,,Ex assembly/shipping

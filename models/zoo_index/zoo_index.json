@@ -1,0 +1,13 @@
+{
+  "zoo_version": "1.0.0",
+  "hub_url": "https://huggingface.co/neuro-sniffer-pro",
+  "models": [
+    {"name":"rf_classifier","version":"1.0.0","task":"6-class RF signal ID",
+     "url":"https://huggingface.co/neuro-sniffer-pro/rf_classifier/resolve/main/model.tflite",
+     "sha256":"replace_with_real_hash","size_kb":178,"accuracy":0.87,"licence":"CC-BY-NC-SA-4.0"},
+    {"name":"ghost_motion","version":"1.0.0","task":"walk/breathe/static CSI classification",
+     "url":"https://huggingface.co/neuro-sniffer-pro/ghost_motion/resolve/main/model.tflite",
+     "sha256":"replace_with_real_hash","size_kb":95,"accuracy":0.91,"licence":"CC-BY-NC-SA-4.0"}
+  ],
+  "note": "Replace sha256 placeholders before publishing"
+}
