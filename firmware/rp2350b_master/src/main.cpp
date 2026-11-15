@@ -4,7 +4,34 @@
  *
  * Pin map: GPIO0/1=Flipper UART | GPIO2-6=SPI(C5,S3) | GPIO8/9=GPS UART
  *          GPIO10/11=I2C OLED | GPIO14-17=SPI microSD | GPIO20=C5 heartbeat
- *          GPIO21=S3 RST | GPIO22=C5 RST | GPIO27=emergency in | GPIO28=kill switch
+ *          GPIO21=S3 RST | GPIO22=C5 RST | GPIO27=ES alert in | GPIO28=kill switch
+ *          GPIO16=RF VCC enable (owned exclusively by task_safety_guard.c)
+ *
+ * SAFETY FIX (2026-11-14): this file used to carry its own task_safety()
+ * with a hard `kill && !emergency` AND-block and NO override path — a
+ * second, competing copy of the safety gate that already exists properly
+ * in task_safety_guard.c (kill-switch + frequency whitelist + power cap +
+ * ADR-003 notify-not-block ES handling, all with audit logging). Two
+ * tasks were also both initialising and polling the same GPIO28/GPIO27
+ * pins into two different global structs — a race, not just duplication.
+ * The duplicate has been deleted. This file now starts the one real
+ * task_safety_guard() task and reads its state via safety_guard_get_state()
+ * for UART status reporting and as a cheap pre-filter before forwarding a
+ * command over SPI.
+ *
+ * TODO (tracked, not done here — flagging rather than silently skipping):
+ * per ADR-017 the authoritative TX decision belongs on the control plane —
+ * C5/S3 should call safety_guard_request_tx() (or an SPI-relayed
+ * equivalent) themselves immediately before keying a transmitter, not
+ * rely on this file's pre-filter below. That control-plane protocol, and
+ * the task_uart_bridge.c override-confirmation flow task_safety_guard.c's
+ * own comments refer to, are not implemented yet anywhere in this tree.
+ * There is also no shared header (e.g. include/ctrl_role.h) exposing
+ * SafetyState_t and the safety_guard_* prototypes — the extern block
+ * below is a stopgap that must stay byte-for-byte in sync with
+ * task_safety_guard.c's struct layout. Move this to a proper header
+ * before this goes near a board that's actually transmitting, per the
+ * "second pair of eyes" note at the top of task_safety_guard.c.
  */
 #include "pico/stdlib.h"
 #include "hardware/uart.h"
@@ -16,35 +43,37 @@
 #include "task.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
 
-#define PIN_KILL   28
-#define PIN_EMERG  27
 #define PIN_C5_HB  20
 #define PIN_C5_RST 22
 #define PIN_S3_RST 21
 #define PIN_C5_CS   5
 #define PIN_S3_CS   6
 
-typedef struct { bool kill, emergency, tx_ok; uint8_t pwr_mw; } Safety_t;
-static Safety_t S = { .pwr_mw = 10 };
+// ─────────────────────────────────────────────────────────────────────────
+// Safety guard API (task_safety_guard.c). Stopgap extern block — see TODO
+// above. This struct layout MUST match task_safety_guard.c's SafetyState_t
+// exactly; there is no shared header yet.
+// ─────────────────────────────────────────────────────────────────────────
+typedef struct {
+    bool     kill_switch_engaged;   // true = physically allowed to transmit
+    bool     es_alert_active;       // true = S3 currently hearing ES traffic
+    bool     rf_vcc_on;             // true = RF power rail is actually live
+    uint8_t  tx_power_cap_mw;       // current enforced ceiling
+    uint32_t last_block_reason;     // SafetyBlockReason_t from task_safety_guard.c
+} SafetyState_t;
+
+extern void task_safety_guard(void *pvParameters);
+extern void safety_guard_get_state(SafetyState_t *out);
+extern bool safety_guard_request_tx(uint64_t freq_hz, uint8_t requested_mw, const char *cmd_name);
+extern void safety_guard_release_tx(void);
 
 static void spi_send(uint8_t cs, const char *cmd) {
     gpio_put(cs, 0);
     spi_write_blocking(spi0, (const uint8_t *)cmd, strlen(cmd));
     gpio_put(cs, 1);
-}
-
-static void task_safety(void *p) {
-    (void)p;
-    while (1) {
-        S.kill      = gpio_get(PIN_KILL);
-        S.emergency = gpio_get(PIN_EMERG);
-        S.tx_ok     = S.kill && !S.emergency;
-        if (!S.tx_ok) { spi_send(PIN_C5_CS,"TX_DISABLE"); spi_send(PIN_S3_CS,"TX_DISABLE"); }
-        if (S.emergency) uart_puts(uart0,"ALERT:EMERGENCY_SHIELD_ACTIVE\r\n");
-        watchdog_update();
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
 }
 
 static void route_cmd(const char *cmd) {
@@ -53,8 +82,14 @@ static void route_cmd(const char *cmd) {
         "BLE_FLOOD","BLE_SPOOF","BLE_FUZZ","SUBGHZ_REPLAY","SUBGHZ_JAM",
         "NFC_WRITE","NFC_CLONE","DUCKY_START", NULL
     };
+
+    // Cheap pre-filter only — NOT the authoritative gate. See TODO above.
+    SafetyState_t safety;
+    safety_guard_get_state(&safety);
+
     for (int i = 0; tx_cmds[i]; i++) {
-        if (strncmp(cmd, tx_cmds[i], strlen(tx_cmds[i])) == 0 && !S.tx_ok) {
+        if (strncmp(cmd, tx_cmds[i], strlen(tx_cmds[i])) == 0 &&
+            !(safety.kill_switch_engaged && !safety.es_alert_active)) {
             uart_puts(uart0, "ERROR:SAFETY_LOCKED\r\n"); return;
         }
     }
@@ -66,9 +101,11 @@ static void route_cmd(const char *cmd) {
              strncmp(cmd,"AI_",3)==0||strncmp(cmd,"MODEL_",6)==0)
         spi_send(PIN_S3_CS, cmd);
     else if (strcmp(cmd,"SAFETY_STATUS")==0) {
-        char b[96];
-        snprintf(b,sizeof(b),"SAFETY:{\"kill\":%d,\"emerg\":%d,\"tx\":%d,\"pwr\":%d}\r\n",
-            S.kill,S.emergency,S.tx_ok,S.pwr_mw);
+        char b[128];
+        snprintf(b,sizeof(b),
+            "SAFETY:{\"kill\":%d,\"es_alert\":%d,\"rf_vcc\":%d,\"pwr_cap_mw\":%d,\"block_reason\":%lu}\r\n",
+            safety.kill_switch_engaged, safety.es_alert_active, safety.rf_vcc_on,
+            safety.tx_power_cap_mw, (unsigned long)safety.last_block_reason);
         uart_puts(uart0,b);
     } else if (strcmp(cmd,"REBOOT")==0) watchdog_reboot(0,0,100);
 }
@@ -76,12 +113,23 @@ static void route_cmd(const char *cmd) {
 static void task_flipper(void *p) {
     (void)p;
     char buf[256]; uint8_t idx=0;
+    bool es_was_active = false;
     while (1) {
         if (uart_is_readable(uart0)) {
             char c=uart_getc(uart0);
             if (c=='\n'||idx>=254){buf[idx]='\0';if(idx>0)route_cmd(buf);idx=0;}
             else if(c!='\r') buf[idx++]=c;
         }
+        // ADR-003 notify-not-block: surface ES proximity to the operator on
+        // every rising edge, same behaviour the old duplicate task had —
+        // just reading the one real safety state now instead of a second,
+        // racing copy of it.
+        SafetyState_t safety;
+        safety_guard_get_state(&safety);
+        if (safety.es_alert_active && !es_was_active) {
+            uart_puts(uart0,"ALERT:EMERGENCY_SHIELD_ACTIVE\r\n");
+        }
+        es_was_active = safety.es_alert_active;
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
@@ -95,12 +143,15 @@ int main(void) {
     int cs_pins[] = {PIN_C5_CS,PIN_S3_CS,PIN_C5_RST,PIN_S3_RST};
     for (int i=0;i<4;i++){gpio_init(cs_pins[i]);gpio_set_dir(cs_pins[i],GPIO_OUT);gpio_put(cs_pins[i],1);}
     i2c_init(i2c0,400000); gpio_set_function(10,GPIO_FUNC_I2C); gpio_set_function(11,GPIO_FUNC_I2C);
-    gpio_init(PIN_KILL);  gpio_set_dir(PIN_KILL, GPIO_IN); gpio_pull_up(PIN_KILL);
-    gpio_init(PIN_EMERG); gpio_set_dir(PIN_EMERG,GPIO_IN); gpio_pull_down(PIN_EMERG);
     gpio_init(PIN_C5_HB); gpio_set_dir(PIN_C5_HB,GPIO_IN);
+    // Kill switch (GPIO28) / ES-alert (GPIO27) / RF-VCC (GPIO16) pins are
+    // owned and initialised exclusively inside task_safety_guard() — not
+    // touched here, so there is exactly one owner of each pin.
     watchdog_enable(5000,true);
     uart_puts(uart0,"NEURO:READY\r\n");
-    xTaskCreate(task_safety,"safety",512,NULL,3,NULL);
+    // Highest application task priority — below only the RTOS tick itself,
+    // per the priority contract documented at the top of task_safety_guard.c.
+    xTaskCreate(task_safety_guard,"safety_guard",512,NULL,4,NULL);
     xTaskCreate(task_flipper,"flipper",1024,NULL,2,NULL);
     vTaskStartScheduler();
     while(1){watchdog_update();}
