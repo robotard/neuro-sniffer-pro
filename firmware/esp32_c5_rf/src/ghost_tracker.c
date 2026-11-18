@@ -192,6 +192,24 @@ void ghost_tracker_init(void){
 
 void ghost_set_gps(float lat,float lon){st.lat=lat;st.lon=lon;}
 void ghost_set_logging(bool e){logging=e;}
+
+// Non-blocking pull of one pending reply line out of this file's internal
+// SPI ring buffer (spi_buf, filled by analysis_task above). Added for the
+// SPI slave task in main.c (see ADR-018) so it has something real to send
+// back to RP2350B instead of writing into a buffer nothing ever drained.
+// Returns true and NUL-terminates `out` if a line was pending; false if
+// nothing was queued right now (caller should send a generic idle ACK).
+bool ghost_tracker_get_reply(char *out, size_t maxlen) {
+    if (!spi_buf || !out || maxlen == 0) return false;
+    size_t item_size = 0;
+    void *item = xRingbufferReceive(spi_buf, &item_size, 0); // 0 = don't block
+    if (!item) return false;
+    size_t n = (item_size < maxlen - 1) ? item_size : maxlen - 1;
+    memcpy(out, item, n);
+    out[n] = '\0';
+    vRingbufferReturnItem(spi_buf, item);
+    return true;
+}
 void ghost_tracker_stop(void){
     esp_wifi_set_csi(false);esp_wifi_set_promiscuous(false);
     if(csi_fp){fflush(csi_fp);fclose(csi_fp);csi_fp=NULL;}

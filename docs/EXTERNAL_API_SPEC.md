@@ -156,13 +156,18 @@ command and doesn't wait for a structured reply.
   response at all — not even an error — which is fine for now but worth
   remembering once FW-005 lands, so this routing table and the error
   path both get updated in that same change rather than drifting.
-- **No response format defined for anything forwarded to C5/S3.** Scan
-  results, capture data, AI inference output, etc. all route out over
-  SPI but nothing in this tree defines how (or whether) a reply comes
-  back to the Flipper over UART. This is the single biggest gap between
-  "what the menu lets you request" and "what the protocol can actually
-  deliver back," and is a reasonable next milestone once C5/S3-side
-  firmware for these commands exists.
+- **Partially closed as of ADR-018 (2026-11-18), C5 side only.** C5 now
+  has a real SPI slave task, and Ghost Tracker's `GHOST:{...}` status
+  lines flow end-to-end back to the Flipper. Every other command
+  forwarded to C5 (`WIFI_SCAN_2G`, `DEAUTH`, `BLE_FLOOD`, etc.) is
+  received and logged on C5 but doesn't trigger any real action —
+  Ghost Tracker runs unconditionally regardless of what's sent, so
+  it's the only thing actually working beyond that point.
+- **S3 has no SPI slave at all, still.** `SUBGHZ_*`, `NFC_*`, `AI_*`,
+  `MODEL_*` commands are written into a void exactly as before — no
+  GPIO pin assignment for an S3-side SPI slave exists anywhere in the
+  hardware docs, so this wasn't silently worked around with invented
+  pins. Needs a hardware-notes decision before it can be mirrored.
 - **`route_cmd()`'s safety pre-filter is non-authoritative** — see the
   TODO at the top of `main.cpp` and ADR-017. The real TX gate is
   `safety_guard_request_tx()` inside `task_safety_guard.c`; this

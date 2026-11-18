@@ -71,9 +71,43 @@ extern bool safety_guard_request_tx(uint64_t freq_hz, uint8_t requested_mw, cons
 extern void safety_guard_release_tx(void);
 
 static void spi_send(uint8_t cs, const char *cmd) {
+    // Write-only. Still used for S3 (PIN_S3_CS) below — S3's main.cpp has
+    // no SPI slave listener implemented and no documented GPIO assignment
+    // for one yet (see ADR-018), so reading back from that CS line would
+    // just clock floating/garbage data. Flagged, not silently worked
+    // around with invented pins.
     gpio_put(cs, 0);
     spi_write_blocking(spi0, (const uint8_t *)cmd, strlen(cmd));
     gpio_put(cs, 1);
+}
+
+// SPI_XFER_LEN (2026-11-18, ADR-018): C5's SPI slave task now expects an
+// exact SPI_XFER_LEN-byte full-duplex transaction every time (no separate
+// "ready" line exists on this 4-wire bus to negotiate a variable length).
+// This value MUST match firmware/esp32_c5_rf/src/main.c's SPI_XFER_LEN.
+#define SPI_XFER_LEN 256
+
+// Full-duplex: write the command (zero-padded to SPI_XFER_LEN) while
+// simultaneously reading back whatever C5's spi_slave_task queued for us
+// in the same transaction. reply_out is NUL-terminated on return; pass
+// NULL to ignore the reply entirely.
+static void spi_transfer_c5(const char *cmd, char *reply_out, size_t reply_cap) {
+    uint8_t tx[SPI_XFER_LEN] = {0};
+    uint8_t rx[SPI_XFER_LEN] = {0};
+    size_t n = strlen(cmd);
+    if (n >= SPI_XFER_LEN) n = SPI_XFER_LEN - 1;
+    memcpy(tx, cmd, n);
+
+    gpio_put(PIN_C5_CS, 0);
+    spi_write_read_blocking(spi0, tx, rx, SPI_XFER_LEN);
+    gpio_put(PIN_C5_CS, 1);
+
+    if (reply_out && reply_cap) {
+        size_t m = strnlen((char *)rx, SPI_XFER_LEN);
+        if (m >= reply_cap) m = reply_cap - 1;
+        memcpy(reply_out, rx, m);
+        reply_out[m] = '\0';
+    }
 }
 
 static void route_cmd(const char *cmd) {
@@ -95,8 +129,19 @@ static void route_cmd(const char *cmd) {
     }
     if (strncmp(cmd,"WIFI_",5)==0||strncmp(cmd,"BLE_",4)==0||
         strncmp(cmd,"ZIGBEE_",7)==0||strncmp(cmd,"OTA_",4)==0||
-        strncmp(cmd,"GHOST_",6)==0||strncmp(cmd,"WARDRIVE",8)==0)
-        spi_send(PIN_C5_CS, cmd);
+        strncmp(cmd,"GHOST_",6)==0||strncmp(cmd,"WARDRIVE",8)==0) {
+        // Full-duplex now (ADR-018): C5 actually has an SPI slave task as
+        // of this change, and already feeds real Ghost Tracker status
+        // lines back through it. Forward whatever comes back to the
+        // Flipper, except the generic idle ACK (nothing worth repeating).
+        char reply[SPI_XFER_LEN];
+        spi_transfer_c5(cmd, reply, sizeof(reply));
+        if (reply[0] && strncmp(reply, "ACK:IDLE", 8) != 0) {
+            uart_puts(uart0, reply);
+            size_t rl = strlen(reply);
+            if (rl == 0 || reply[rl-1] != '\n') uart_puts(uart0, "\r\n");
+        }
+    }
     else if (strncmp(cmd,"SUBGHZ_",7)==0||strncmp(cmd,"NFC_",4)==0||
              strncmp(cmd,"AI_",3)==0||strncmp(cmd,"MODEL_",6)==0)
         spi_send(PIN_S3_CS, cmd);

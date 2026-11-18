@@ -19,6 +19,7 @@
 | ADR-015 | Proximity-based lock/wipe (SEC-002) | Accepted | SEC, FW |
 | ADR-016 | Git as source of truth | Accepted | DOC, FW |
 | ADR-017 | HAL role naming + control/data plane split | Accepted | FW, SEC |
+| ADR-018 | C5 SPI slave + closed-loop reply path | Accepted | FW, SEC |
 | ADR-I-001 | Test base JTAG/SWD (INTERNAL) | Accepted | HW |
 | ADR-I-002 | Signed boot keypair mgmt (INTERNAL) | Accepted | SEC |
 
@@ -27,7 +28,7 @@ Internal ADRs: internal/decisions/ — never pushed to public repo.
 
 ---
 ## ADR TEMPLATE
-```
+\`\`\`
 # ADR-XXX — Title
 - Status: Proposed | Accepted | Deprecated | Superseded by ADR-YYY
 - Date: YYYY-MM-DD
@@ -38,4 +39,4 @@ Internal ADRs: internal/decisions/ — never pushed to public repo.
 ## Alternatives Considered
 ## Consequences
 ## References
-```
+\`\`\`

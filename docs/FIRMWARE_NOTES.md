@@ -190,20 +190,19 @@ Auto-rollback to previous partition if heartbeat lost after boot.
 
 ## UART PROTOCOL (Flipper ↔ RP2350B)
 
-Baud: 115200, 8N1, no flow control
-Format: Newline-terminated JSON
-Max command length: 512 bytes
-
-```json
-// Command (Flipper → RP2350B)
-{"cmd":"WIFI_SCAN","params":{"band":"both","duration_ms":5000}}
-
-// Response (RP2350B → Flipper)
-{"cmd":"WIFI_SCAN","status":"ok","data":{...},"test_mode":true}
-
-// Error
-{"cmd":"WIFI_SCAN","status":"error","reason":"TX_WHITELIST_BLOCK","test_mode":true}
-```
+**Corrected 2026-11-18**: this section used to describe a newline-terminated
+JSON envelope (`{"cmd":"WIFI_SCAN","params":{...}}`) that was never what got
+implemented — it looks like an early design sketch that was superseded by
+the simpler flat-text protocol actually built into `main.cpp`'s `route_cmd()`
+and `software/flipper_lua/rf_neuro.lua`, but this file never got updated to
+match. The JSON example above has been removed rather than left to confuse
+the next person reading this file. **`docs/EXTERNAL_API_SPEC.md` is the
+authoritative, implementation-grounded spec for this protocol** — read that
+instead. Short version: plain text commands, one per line, e.g.
+`WIFI_SCAN_2G` or `DEAUTH AA:BB:CC:DD:EE:FF`, max 254 bytes, 115200 8N1.
+No generic response envelope exists; see EXTERNAL_API_SPEC.md §4 and §6 for
+exactly what reply formats are real versus still open (including ADR-018's
+partial fix for C5 command replies).
 
 ---
 
