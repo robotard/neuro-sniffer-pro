@@ -16,6 +16,7 @@
 | ADR-012 | ML models closed source alpha | Accepted | ML, SEC |
 | ADR-013 | Pogo midriff tap test base | Accepted | HW |
 | ADR-014 | ADR format + Log4brains | Accepted | DOC |
+| ADR-015 | Proximity-based lock/wipe (SEC-002) | Accepted | SEC, FW |
 | ADR-016 | Git as source of truth | Accepted | DOC, FW |
 | ADR-017 | HAL role naming + control/data plane split | Accepted | FW, SEC |
 | ADR-I-001 | Test base JTAG/SWD (INTERNAL) | Accepted | HW |
