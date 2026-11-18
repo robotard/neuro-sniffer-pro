@@ -48,7 +48,7 @@ REBOOT
 | `SUBGHZ_*`, `NFC_*`, `AI_*`, `MODEL_*` | ESP32-S3 (SPI, CS=GPIO6) | |
 | `SAFETY_STATUS` | RP2350B, handled locally | Returns JSON, see §4 |
 | `REBOOT` | RP2350B, handled locally | Calls `watchdog_reboot()`, no response sent |
-| `GPS_STATUS` | *(in `rf_neuro.lua`'s menu, not yet in `route_cmd()`'s routing table)* | See §6 — currently falls through with no match and gets no response |
+| `GPS_STATUS` | *(reserved — GPS is a planned future feature, not yet implemented)* | See §6 — currently falls through with no match and gets no response |
 | anything else unmatched | silently dropped | `route_cmd()` has no default/unknown-command branch; a typo or unimplemented command gets no `ERROR:` reply at all today |
 
 A command is forwarded to C5/S3 as the exact same text line over SPI —
@@ -147,9 +147,15 @@ command and doesn't wait for a structured reply.
   defines how long the Lua app should wait for a reply before treating
   a command as failed.
 - **`GPS_STATUS` is in the Lua menu but not in `route_cmd()`'s routing
-  table.** Sending it today gets no response — not even an error.
-  This should either be wired to a real GPS status handler or removed
-  from the menu until it is; flagging rather than guessing which.
+  table.** This is expected, not a bug: GPS is a planned future feature.
+  The NEO-M9N UART (GPIO8/9) is already reserved in `main.cpp`'s pin map
+  and `audit_logger.c` already carries an `extern` stub for the
+  NMEA-parsing task that will own it (`task_gps_parser.c`, tracked as
+  Trello [FW-005](https://trello.com/c/eZfqFQU0), currently Backlog on
+  the Firmware board, not started). Sending `GPS_STATUS` today gets no
+  response at all — not even an error — which is fine for now but worth
+  remembering once FW-005 lands, so this routing table and the error
+  path both get updated in that same change rather than drifting.
 - **No response format defined for anything forwarded to C5/S3.** Scan
   results, capture data, AI inference output, etc. all route out over
   SPI but nothing in this tree defines how (or whether) a reply comes
